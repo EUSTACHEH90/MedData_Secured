@@ -217,7 +217,7 @@ export default function PatientForm() {
               onChange={handleChange}
               className="w-full rounded-md border border-gray-300 p-2 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Sélectionnez votre groupe sanguin</option>
+              <option value="">Sélectionnez le groupe sanguin</option>
               <option value="A+">A+</option>
               <option value="A-">A-</option>
               <option value="B+">B+</option>
