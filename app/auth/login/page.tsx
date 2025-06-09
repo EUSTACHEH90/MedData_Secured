@@ -1,26 +1,31 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const role = searchParams.get("role") as "patient" | "medecin" | null
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [rpps, setRpps] = useState("")
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const role = searchParams.get("role") as "patient" | "medecin" | null;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [rpps, setRpps] = useState("");
+
+  useEffect(() => {
+    if (!role) {
+      router.replace("/"); // redirection déclenchée APRES le rendu initial
+    }
+  }, [role, router]);
 
   if (!role) {
-    router.replace("/") // redirection vers accueil si aucun rôle
-    return null
+    return null; // attendre la redirection
   }
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    console.log({ role, email, password, rpps })
+    e.preventDefault();
+    console.log({ role, email, password, rpps });
     // API de connexion ici
-  }
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-100 px-4">
@@ -64,11 +69,14 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
+          <button
+            type="submit"
+            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
+          >
             Se connecter
           </button>
         </form>
       </div>
     </div>
-  )
+  );
 }
