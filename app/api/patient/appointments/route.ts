@@ -4,6 +4,24 @@ import { jwtVerify } from "jose";
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
 
+interface AppointmentRecord {
+  id: string;
+  createdAt: Date;
+  title: string | null;
+  doctor: {
+    firstName: string;
+    lastName: string;
+  };
+}
+
+interface Appointment {
+  id: string;
+  date: string;
+  location: string;
+  status: string;
+  isTeleconsultation: boolean;
+}
+
 export async function GET(req: Request) {
   try {
     const authHeader = req.headers.get("authorization");
@@ -32,7 +50,7 @@ export async function GET(req: Request) {
     }
 
     const appointments = await prisma.medicalRecord.findMany({
-      where: { patientId: userId, type: "AUTRE" }, // À ajuster selon votre logique pour les rendez-vous
+      where: { patientId: userId, type: "AUTRE" },
       select: {
         id: true,
         createdAt: true,
@@ -43,13 +61,12 @@ export async function GET(req: Request) {
       },
     });
 
-    // Formater les données pour correspondre à l'interface Appointment
-    const formattedAppointments = appointments.map((a) => ({
+    const formattedAppointments: Appointment[] = appointments.map((a: AppointmentRecord) => ({
       id: a.id,
       date: a.createdAt.toISOString().split("T")[0],
       location: a.title || "Non spécifié",
-      status: "Confirmé", // À ajuster avec une logique réelle si disponible
-      isTeleconsultation: false, // À implémenter si pertinent
+      status: "Confirmé",
+      isTeleconsultation: false,
     }));
 
     console.log("Rendez-vous renvoyés pour userId :", userId, formattedAppointments);
