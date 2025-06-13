@@ -63,7 +63,8 @@
 
 
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { prisma } from '@/lib/prisma';
+
 import { jwtVerify } from "jose";
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
