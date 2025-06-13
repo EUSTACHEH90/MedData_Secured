@@ -1,71 +1,98 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
+interface LoginResponse {
+  token?: string;
+  role?: string;
+  userId?: string;
+  message?: string;
+}
 
 export default function LoginForm() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-  const role = searchParams.get("role") as "patient" | "medecin" | null;
+  const searchParams = useSearchParams();
+  const urlRole = searchParams.get("role") || "patient";
+  const role = urlRole.toLowerCase() === "patient" ? "Patient" : "Medecin";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rpps, setRpps] = useState("");
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (!role) {
-      router.replace("/"); // redirection si pas de rôle défini
-    }
-  }, [role, router]);
-
-  if (!role) return null; // on attend la redirection
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log({ role, email, password, rpps });
-    // Appel API de connexion ici
+
+    console.log("Requête envoyée à /api/auth/login :", { email, password, role });
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, role }),
+      });
+
+      const data: LoginResponse = await res.json();
+      console.log("Réponse de l'API :", data);
+
+      if (!res.ok) {
+        setError(data.message || "Erreur lors de la connexion");
+        console.log("Erreur API :", data.message);
+        return;
+      }
+
+      console.log("Connexion réussie, stockage des données :", {
+        token: data.token,
+        role: data.role,
+        userId: data.userId,
+      });
+
+      document.cookie = `token=${data.token}; path=/; max-age=7200; SameSite=Strict`;
+      document.cookie = `role=${data.role}; path=/; max-age=7200; SameSite=Strict`;
+
+      console.log("Cookies définis :", document.cookie);
+
+      // Temporisation pour garantir que les cookies soient appliqués
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      if (data.role === "Patient") {
+        console.log("Redirection vers /dashboard/patient");
+        router.push("/dashboard/patient");
+      } else if (data.role === "Medecin") {
+        console.log("Redirection vers /dashboard/medecin");
+        router.push("/dashboard/medecin");
+      } else {
+        console.log("Rôle inattendu :", data.role);
+        setError("Rôle invalide renvoyé par l'API");
+      }
+
+      console.log("Fin de handleSubmit");
+    } catch (err: unknown) {
+      setError("Erreur réseau lors de la connexion");
+      console.error("Erreur réseau :", err);
+    }
   };
 
   return (
-    <div className="w-full max-w-md bg-white p-6 rounded shadow">
-      <h2 className="text-2xl font-bold text-center mb-6">
-        Connexion {role === "medecin" ? "Médecin" : "Patient"}
-      </h2>
+    <div className="w-full max-w-md bg-white p-6 border rounded shadow">
+      <h2 className="text-2xl font-semibold mb-5">Connexion ({role})</h2>
+      {error && <p className="text-red-500 mb-4">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium">Email</label>
-          <input
-            type="email"
-            className="w-full p-2 border rounded"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium">Mot de passe</label>
-          <input
-            type="password"
-            className="w-full p-2 border rounded"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-
-        {role === "medecin" && (
-          <div>
-            <label className="block text-sm font-medium">Numéro RPPS</label>
-            <input
-              type="text"
-              className="w-full p-2 border rounded"
-              value={rpps}
-              onChange={(e) => setRpps(e.target.value)}
-              required
-            />
-          </div>
-        )}
-
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Mot de passe"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full p-2 border rounded"
+          required
+        />
         <button
           type="submit"
           className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
