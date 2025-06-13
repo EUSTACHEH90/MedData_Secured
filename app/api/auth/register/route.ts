@@ -2,7 +2,7 @@
 // import type { NextRequest } from "next/server";
 // import prisma from "@/lib/prisma";
 // import { hashPassword } from "@/lib/utils/auth";
-// import { UserRole } from "@prisma/client"; // ✅ Suffisant. Pas besoin d'importer Prisma
+// import type{ UserRole } from "@prisma/client"; // ✅ Suffisant. Pas besoin d'importer Prisma
 
 // export async function POST(req: NextRequest) {
 //   try {
@@ -87,7 +87,12 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { hashPassword } from "@/lib/utils/auth";
-import { UserRole } from "@prisma/client"; // ✅ Import correct
+
+// Définition locale de l'enum si l'import ne fonctionne pas
+enum UserRole {
+  Patient = "Patient",
+  Medecin = "Medecin"
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -110,7 +115,6 @@ export async function POST(req: NextRequest) {
       hospital,
     } = await req.json();
 
-    // Vérification email déjà utilisé
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return NextResponse.json({ error: "Email déjà utilisé." }, { status: 400 });
@@ -119,12 +123,11 @@ export async function POST(req: NextRequest) {
     // Vérification numéro de sécurité sociale déjà utilisé
     const existingUserBySSN = await prisma.user.findUnique({ where: { socialSecurityNumber } });
     if (existingUserBySSN) {
-      return NextResponse.json({ error: "Numéro de sécurité sociale déjà utilisé." }, { status: 400 });
+      return NextResponse.json({ message: "Ce numéro de sécurité sociale est déjà utilisé." }, { status: 400 });
     }
-
+    
     const hashedPassword = await hashPassword(password);
 
-    // Conversion du rôle en enum Prisma
     let userRole: UserRole;
     if (role.toLowerCase() === "patient") {
       userRole = UserRole.Patient;
@@ -155,8 +158,8 @@ export async function POST(req: NextRequest) {
     } else if (userRole === UserRole.Patient) {
       newUserData.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
       newUserData.bloodType = bloodType || null;
-      newUserData.allergies = allergies || null;
-      newUserData.medicalHistory = medicalHistory || null;
+      newUserData.allergies = allergies;
+      newUserData.medicalHistory = medicalHistory;
     }
 
     const user = await prisma.user.create({
@@ -166,6 +169,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: "Inscription réussie", user });
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    return NextResponse.json({ message: "Erreur serveur" }, { status: 500 });
   }
 }
