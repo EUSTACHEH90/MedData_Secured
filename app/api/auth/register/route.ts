@@ -2,7 +2,6 @@
 // import type { NextRequest } from "next/server";
 // import prisma from "@/lib/prisma";
 // import { hashPassword } from "@/lib/utils/auth";
-// import type{ UserRole } from "@prisma/client"; // ✅ Suffisant. Pas besoin d'importer Prisma
 
 // export async function POST(req: NextRequest) {
 //   try {
@@ -35,13 +34,15 @@
 //     if (existingUserBySSN) {
 //       return NextResponse.json({ message: "Ce numéro de sécurité sociale est déjà utilisé." }, { status: 400 });
 //     }
+    
 //     const hashedPassword = await hashPassword(password);
 
-//     let userRole: UserRole;
+//     // Utilisation directe des valeurs string avec validation
+//     let userRole: "Patient" | "Medecin";
 //     if (role.toLowerCase() === "patient") {
-//       userRole = UserRole.Patient;
+//       userRole = "Patient";
 //     } else if (role.toLowerCase() === "medecin") {
-//       userRole = UserRole.Medecin;
+//       userRole = "Medecin";
 //     } else {
 //       return NextResponse.json({ error: "Rôle invalide." }, { status: 400 });
 //     }
@@ -60,11 +61,11 @@
 //       socialSecurityNumber,
 //     };
 
-//     if (userRole === UserRole.Medecin) {
+//     if (userRole === "Medecin") {
 //       newUserData.numeroOrdre = numeroOrdre;
 //       newUserData.speciality = speciality;
 //       newUserData.hospital = hospital;
-//     } else if (userRole === UserRole.Patient) {
+//     } else if (userRole === "Patient") {
 //       newUserData.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
 //       newUserData.bloodType = bloodType || null;
 //       newUserData.allergies = allergies;
@@ -82,17 +83,11 @@
 //   }
 // }
 
-
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { hashPassword } from "@/lib/utils/auth";
-
-// Définition locale de l'enum si l'import ne fonctionne pas
-enum UserRole {
-  Patient = "Patient",
-  Medecin = "Medecin"
-}
+import type { UserRole } from "@/types/prisma";
 
 export async function POST(req: NextRequest) {
   try {
@@ -128,11 +123,12 @@ export async function POST(req: NextRequest) {
     
     const hashedPassword = await hashPassword(password);
 
+    // Validation et typage du rôle
     let userRole: UserRole;
     if (role.toLowerCase() === "patient") {
-      userRole = UserRole.Patient;
+      userRole = "Patient";
     } else if (role.toLowerCase() === "medecin") {
-      userRole = UserRole.Medecin;
+      userRole = "Medecin";
     } else {
       return NextResponse.json({ error: "Rôle invalide." }, { status: 400 });
     }
@@ -151,11 +147,11 @@ export async function POST(req: NextRequest) {
       socialSecurityNumber,
     };
 
-    if (userRole === UserRole.Medecin) {
+    if (userRole === "Medecin") {
       newUserData.numeroOrdre = numeroOrdre;
       newUserData.speciality = speciality;
       newUserData.hospital = hospital;
-    } else if (userRole === UserRole.Patient) {
+    } else if (userRole === "Patient") {
       newUserData.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
       newUserData.bloodType = bloodType || null;
       newUserData.allergies = allergies;
