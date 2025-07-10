@@ -6,60 +6,37 @@
 
 // export async function GET(req: Request) {
 //   try {
-//     const authHeader = req.headers.get("authorization");
-//     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
+//     const token = req.headers.get("authorization")?.replace("Bearer ", "");
 //     if (!token) {
-//       console.log("Aucun token fourni dans Authorization pour /results.");
 //       return NextResponse.json({ message: "Token manquant." }, { status: 401 });
 //     }
 
-//     let payload;
-//     try {
-//       const result = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-//       payload = result.payload;
-//     } catch (err) {
-//       console.log("Token invalide ou expiré pour /results :", err);
-//       return NextResponse.json({ message: "Token invalide ou expiré." }, { status: 401 });
+//     const { payload } = await jwtVerify(token, JWT_SECRET);
+//     if (payload.role !== "Patient") {
+//       return NextResponse.json({ message: "Accès interdit." }, { status: 403 });
 //     }
 
-//     const userId = payload.id as string;
-//     const role = payload.role as string;
-
-//     if (!userId || !role || role !== "Patient") {
-//       console.log("Rôle non autorisé ou payload invalide pour /results :", role);
-//       return NextResponse.json({ message: "Accès non autorisé." }, { status: 403 });
-//     }
-
-//     const results = await prisma.medicalRecord.findMany({
-//       where: { patientId: userId, type: { in: ["ANALYSE", "ORDONNANCE"] } },
+//     const results = await prisma.result.findMany({
+//       where: { patientId: payload.id as string },
 //       select: {
 //         id: true,
-//         createdAt: true,
 //         type: true,
-//         content: true,
-//         doctor: {
-//           select: { firstName: true, lastName: true },
-//         },
+//         date: true,
+//         description: true,
+//         fileUrl: true,
+//         isShared: true,
+//         sharedWith: { select: { id: true, firstName: true, lastName: true } },
+//         createdBy: { select: { id: true, firstName: true, lastName: true } }, // Ajout du médecin créateur
 //       },
+//       orderBy: { date: "desc" },
 //     });
 
-//     // Formater les données pour correspondre à l'interface Result
-//     const formattedResults = results.map((r) => ({
-//       id: r.id,
-//       type: r.type,
-//       date: r.createdAt.toISOString().split("T")[0],
-//       documentHash: null, // À implémenter si hachage Blockchain est ajouté
-//     }));
-
-//     console.log("Résultats renvoyés pour userId :", userId, formattedResults);
-//     return NextResponse.json(formattedResults);
-//   } catch (error) {
-//     console.error("Erreur /api/patient/results :", error);
+//     return NextResponse.json(results);
+//   } catch (err) {
+//     console.error("Erreur lors de la récupération des résultats :", err);
 //     return NextResponse.json({ message: "Erreur serveur." }, { status: 500 });
 //   }
 // }
-
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
@@ -67,75 +44,46 @@ import { jwtVerify } from "jose";
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
 
-interface ResultRecord {
-  id: string;
-  createdAt: Date;
-  type: string;
-  content: string | null;
-  doctor: {
-    firstName: string;
-    lastName: string | null;
-  };
-}
-
-interface FormattedResult {
-  id: string;
-  type: string;
-  date: string;
-  documentHash: string | null;
-}
-
 export async function GET(req: Request) {
   try {
-    const authHeader = req.headers.get("authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
+    const token = req.headers.get("authorization")?.replace("Bearer ", "");
     if (!token) {
-      console.log("Aucun token fourni dans Authorization pour /results.");
+      console.log("Token manquant à 06:47 PM GMT, 08/07/2025");
       return NextResponse.json({ message: "Token manquant." }, { status: 401 });
     }
 
-    let payload: any;
-    try {
-      const result = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-      payload = result.payload;
-    } catch (err) {
-      console.log("Token invalide ou expiré pour /results :", err);
-      return NextResponse.json({ message: "Token invalide ou expiré." }, { status: 401 });
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    if (payload.role !== "Patient") {
+      console.log("Rôle invalide pour userId:", payload.id, "à 06:47 PM GMT, 08/07/2025");
+      return NextResponse.json({ message: "Accès interdit." }, { status: 403 });
     }
 
-    const userId = payload.id as string;
-    const role = payload.role as string;
+    const patientId = payload.id as string;
+    console.log("Recherche de résultats pour patientId:", patientId, "à 06:47 PM GMT, 08/07/2025");
 
-    if (!userId || !role || role !== "Patient") {
-      console.log("Rôle non autorisé ou payload invalide pour /results :", role);
-      return NextResponse.json({ message: "Accès non autorisé." }, { status: 403 });
-    }
-
-    const results: ResultRecord[] = await prisma.medicalRecord.findMany({
-      where: { patientId: userId, type: { in: ["ANALYSE", "ORDONNANCE"] } },
+    const results = await prisma.result.findMany({
+      where: { patientId },
       select: {
         id: true,
-        createdAt: true,
         type: true,
-        content: true,
-        doctor: {
-          select: { firstName: true, lastName: true },
-        },
+        date: true,
+        description: true,
+        fileUrl: true,
+        isShared: true,
+        sharedWith: { select: { id: true, firstName: true, lastName: true } },
+        createdBy: { select: { id: true, firstName: true, lastName: true } },
       },
+      orderBy: { date: "desc" },
     });
 
-    const formattedResults: FormattedResult[] = results.map((r) => ({
-      id: r.id,
-      type: r.type,
-      date: r.createdAt.toISOString().split("T")[0],
-      documentHash: null, // À implémenter si hachage Blockchain est ajouté
-    }));
+    console.log("Résultats trouvés:", results, "à 06:47 PM GMT, 08/07/2025");
+    if (!results || results.length === 0) {
+      console.log("Aucun résultat trouvé pour patientId:", patientId, "à 06:47 PM GMT, 08/07/2025");
+    }
 
-    console.log("Résultats renvoyés pour userId :", userId, formattedResults);
-    return NextResponse.json(formattedResults);
-  } catch (error) {
-    console.error("Erreur /api/patient/results :", error);
+    return NextResponse.json(results);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des résultats à 06:47 PM GMT, 08/07/2025 :", err);
     return NextResponse.json({ message: "Erreur serveur." }, { status: 500 });
   }
 }

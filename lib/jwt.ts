@@ -25,8 +25,12 @@ export function signJWT(payload: object, expiresIn = "7d"): string {
 
 export function verifyJWT(token: string): string | JwtPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (typeof decoded === "string") return null;
+    return decoded as JwtPayload;
+  } catch (error) {
     return null;
   }
+
+  
 }

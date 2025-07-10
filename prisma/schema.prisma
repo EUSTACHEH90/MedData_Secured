@@ -7,89 +7,137 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  Patient
-  Medecin
-}
-
-enum AccessRequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum RecordType {
-  CONSULTATION
-  ORDONNANCE
-  ANALYSE
-  AUTRE
-}
-
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String
-  role          UserRole
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  password             String
+  role                 String // "Patient" | "Medecin" | "Admin"
+  firstName            String?
+  lastName             String?
+  gender               String?
+  address              String?
+  phoneNumber          String?
+  socialSecurityNumber String?   @unique
+  dateOfBirth          DateTime?
+  bloodType            String?
+  allergies            String?
+  medicalHistory       String?
+  numeroOrdre          String?
+  speciality           String?
+  hospital             String?
+  weight               String?
+  height               String?
+  bloodPressure        Json? // { systolic: string, diastolic: string }
+  heartRate            String?
+  oxygen               String?
+  temperature          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  // Champs communs
-  firstName     String
-  lastName      String
-  gender        String
-  address       String
-  phoneNumber   String
-  socialSecurityNumber String @unique
+  // Relations pour les patients
+  rendezVousAsPatient  RendezVous[] @relation("PatientRendezVous")
+  consultationsAsPatient Consultation[] @relation("PatientConsultations")
+  notificationsAsPatient Notification[] @relation("NotificationPatient")
+  resultsAsPatient     Result[] @relation("PatientResults")
 
-  // Champs spécifiques au médecin
-  numeroOrdre    String?   @unique // Numéro d’inscription à l’Ordre des Médecins (unique pour les médecins)
-  speciality    String?
-  hospital      String?  //  Ajout de l’hôpital pour les médecins
+  // Relations pour les médecins
+  rendezVousAsMedecin  RendezVous[] @relation("MedecinRendezVous")
+  consultationsAsMedecin Consultation[] @relation("MedecinConsultations")
+  notificationsAsMedecin Notification[] @relation("NotificationMedecin")
+  resultsCreated       Result[] @relation("MedecinResults")
+  sharedResults        Result[] @relation("SharedResults")
 
-  // Champs spécifiques au patient
-  dateOfBirth   DateTime?
-  bloodType     String?
-  allergies     String?
-  medicalHistory String?
-
-  // Relations
-  medicalRecords    MedicalRecord[]  @relation("PatientRecords")
-  authoredRecords   MedicalRecord[]  @relation("DoctorRecords")
-  accessRequests    AccessRequest[]  @relation("RequestedBy")
-  accessGrants      AccessRequest[]  @relation("GrantedTo")
+  // ✅ Relations ajoutées
+  patientAccessRequests AccessRequest[] @relation("PatientAccessRequests")
+  medecinAccessRequests AccessRequest[] @relation("MedecinAccessRequests")
 }
 
-model MedicalRecord {
-  id          String     @id @default(cuid())
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  title       String
-  content     String
-  type        RecordType
+model RendezVous {
+  id                 String   @id @default(uuid())
+  patientId          String
+  patient            User     @relation("PatientRendezVous", fields: [patientId], references: [id])
+  medecinId          String  // Médecin assigné au rendez-vous
+  medecin            User?    @relation("MedecinRendezVous", fields: [medecinId], references: [id])
+  date               DateTime
+  location           String?
+  status             String   @default("En attente") // "En attente", "Confirmé", "Rejeté", "Terminé"
+  isTeleconsultation Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
 
-  // Relations
+model Consultation {
+  id         String   @id @default(uuid())
+  patientId  String
+  patient    User     @relation("PatientConsultations", fields: [patientId], references: [id])
+  medecinId  String   // Seul un médecin peut créer une consultation
+  medecin    User     @relation("MedecinConsultations", fields: [medecinId], references: [id])
+  date       DateTime
+  summary    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Notification {
+  id        String       @id @default(uuid())
+  message   String
+  date      DateTime     @default(now())
+  read      Boolean      @default(false)
+  type      String       // Changé pour "general" comme valeur par défaut
+  relatedId String?      @unique// Supprimez @unique si plusieurs notifications par AccessRequest sont possibles
+  patientId String?
+  patient   User?        @relation("NotificationPatient", fields: [patientId], references: [id])
+  medecinId String?
+  medecin   User?        @relation("NotificationMedecin", fields: [medecinId], references: [id])
+  accessRequest AccessRequest? @relation("NotificationAccessRequest", fields: [relatedId], references: [id])
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+
+model Result {
+  id          String   @id @default(uuid())
   patientId   String
-  patient     User       @relation("PatientRecords", fields: [patientId], references: [id])
-  doctorId    String
-  doctor      User       @relation("DoctorRecords", fields: [doctorId], references: [id])
+  patient     User     @relation("PatientResults", fields: [patientId], references: [id])
+  createdById String // Seul un médecin peut créer un résultat
+  createdBy   User     @relation("MedecinResults", fields: [createdById], references: [id])
 
-  @@index([patientId])
-  @@index([doctorId])
+  type         String
+  date         DateTime
+  description  String?
+  fileUrl      String?
+  documentHash String?
+  isShared     Boolean  @default(false)
+
+  sharedWithId String?
+  sharedWith   User?   @relation("SharedResults", fields: [sharedWithId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ✅ Relation ajoutée pour BlockchainTransaction
+  blockchainTransactions BlockchainTransaction[]
 }
 
 model AccessRequest {
-  id            String               @id @default(cuid())
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  status        AccessRequestStatus
-  expiresAt     DateTime
+  id         String       @id @default(uuid())
+  status     String       @default("En attente")
+  patientId  String
+  medecinId  String
+  patient    User         @relation("PatientAccessRequests", fields: [patientId], references: [id])
+  medecin    User         @relation("MedecinAccessRequests", fields: [medecinId], references: [id])
 
-  // Relations
-  requestedById String
-  requestedBy   User                @relation("RequestedBy", fields: [requestedById], references: [id])
-  grantedToId   String
-  grantedTo     User                @relation("GrantedTo", fields: [grantedToId], references: [id])
+  notification Notification? @relation("NotificationAccessRequest")
 
-  @@index([requestedById])
-  @@index([grantedToId])
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+
+model BlockchainTransaction {
+  id              String   @id @default(uuid())
+  relatedResultId String   @unique
+  transactionHash String
+  result          Result   @relation(fields: [relatedResultId], references: [id])
+  createdAt       DateTime @default(now())
 }

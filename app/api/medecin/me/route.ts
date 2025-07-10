@@ -1,145 +1,213 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { jwtVerify, JWTPayload } from "jose";
+import prisma from "@/lib/prisma"; // Ajustez le chemin selon votre structure
+import { jwtVerify } from "jose";
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
+// Définition des interfaces pour les types
+interface User {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  dateOfBirth: Date | null;
+  medicalHistory: string | null;
+}
+
+interface Doctor extends User {
+  email: string | null;
+  speciality: string | null;
+  phoneNumber: string | null;
+  address: string | null;
+}
+
+interface Notification {
+  id: string;
+  message: string;
+  date: Date;
+  read: boolean;
+  patientId: string | null;
+}
+
+interface Result {
+  id: string;
+  type: string;
+  date: Date;
+  description: string;
+  fileUrl: string | null;
+  patientId: string;
+  patient: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+  };
+}
+
+const JWT_SECRET = process.env.JWT_SECRET
+  ? new TextEncoder().encode(process.env.JWT_SECRET)
+  : null;
 
 export async function GET(req: Request) {
   try {
-    const authHeader = req.headers.get("authorization");
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.log("Aucun en-tête Authorization ou format invalide");
-      return NextResponse.json({ message: "Non autorisé" }, { status: 401 });
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: "Configuration serveur incorrecte." }, { status: 500 });
     }
 
-    const token = authHeader.split(" ")[1];
-    console.log("Token reçu:", token);
+    const token = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) {
+      return NextResponse.json({ error: "Token manquant." }, { status: 401 });
+    }
 
-    let payload: JWTPayload;
+    let payload;
     try {
-      const verified = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-      payload = verified.payload;
-      console.log("Payload décodé:", payload);
+      const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
+      payload = verifiedPayload;
     } catch (err) {
-      console.log("Erreur lors de la vérification du token:", err);
-      return NextResponse.json({ message: "Token invalide" }, { status: 401 });
+      return NextResponse.json({ error: "Token invalide ou expiré." }, { status: 401 });
     }
 
-    const id = payload.id as string | undefined;
-    const role = payload.role as string | undefined;
-
-    if (!id || !role) {
-      console.log("Payload JWT incomplet");
-      return NextResponse.json({ message: "Token invalide" }, { status: 401 });
+    const userId = typeof payload.id === "string" ? payload.id : undefined;
+    const role = typeof payload.role === "string" ? payload.role : undefined;
+    if (!userId || !role || role !== "Medecin") {
+      return NextResponse.json({ error: "Accès non autorisé." }, { status: 403 });
     }
 
-    console.log("ID extrait:", id, "Rôle extrait:", role);
-
-    if (role !== "Medecin") {
-      console.log("Rôle invalide:", role);
-      return NextResponse.json({ message: "Accès réservé aux médecins" }, { status: 403 });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id },
+    const doctor = await prisma.user.findUnique({
+      where: { id: userId, role: "Medecin" },
       select: {
         id: true,
         firstName: true,
         lastName: true,
         email: true,
-        gender: true,
-        address: true,
-        phoneNumber: true,
-        socialSecurityNumber: true,
-        numeroOrdre: true,
         speciality: true,
-        hospital: true,
-        createdAt: true,
+        phoneNumber: true,
+        address: true,
       },
     });
 
-    if (!user) {
-      console.log("Utilisateur non trouvé pour l'ID:", id);
-      return NextResponse.json({ message: "Utilisateur introuvable" }, { status: 404 });
+    if (!doctor) {
+      return NextResponse.json({ error: "Médecin non trouvé." }, { status: 404 });
     }
 
-    console.log("Utilisateur trouvé:", user);
-    return NextResponse.json(user);
+    const patients = await prisma.user.findMany({
+      where: {
+        role: "Patient",
+        consultationsAsPatient: {
+          some: { medecinId: userId },
+        },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        dateOfBirth: true,
+        medicalHistory: true,
+      },
+    });
+
+    const notifications = await prisma.notification.findMany({
+      where: { medecinId: userId },
+      select: {
+        id: true,
+        message: true,
+        date: true,
+        read: true,
+        patientId: true,
+      },
+    });
+
+    const sharedResults = await prisma.result.findMany({
+      where: { createdById: userId, isShared: true },
+      select: {
+        id: true,
+        type: true,
+        date: true,
+        description: true,
+        fileUrl: true,
+        patientId: true,
+        patient: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return NextResponse.json(
+      {
+        doctor,
+        patients: patients.map((p: User) => ({
+          id: p.id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          dateOfBirth: p.dateOfBirth ? p.dateOfBirth.toISOString() : null,
+          dossier: p.medicalHistory || "Aucun dossier médical",
+        })),
+        notifications,
+        sharedResults,
+      },
+      { status: 200 }
+    );
   } catch (error) {
-    console.error("Erreur interne:", error);
-    return NextResponse.json({ message: "Erreur interne serveur" }, { status: 500 });
+    console.error("Erreur dans /api/medecin/me GET :", error);
+    return NextResponse.json({ error: "Erreur serveur." }, { status: 500 });
   }
 }
 
+export async function PUT(req: Request) {
+  try {
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: "Configuration serveur incorrecte." }, { status: 500 });
+    }
 
+    const token = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) {
+      return NextResponse.json({ error: "Token manquant." }, { status: 401 });
+    }
 
-// import { NextResponse } from "next/server";
-// import prisma from "@/lib/prisma";
-// import { jwtVerify } from "jose";
-// import { MedicalRecord, AccessRequest } from "@prisma/client";
+    let payload;
+    try {
+      const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
+      payload = verifiedPayload;
+    } catch (err) {
+      return NextResponse.json({ error: "Token invalide ou expiré." }, { status: 401 });
+    }
 
-// const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
+    const userId = typeof payload.id === "string" ? payload.id : undefined;
+    const role = typeof payload.role === "string" ? payload.role : undefined;
+    if (!userId || !role || role !== "Medecin") {
+      return NextResponse.json({ error: "Accès non autorisé." }, { status: 403 });
+    }
 
-// export async function GET(req: Request) {
-//   try {
-//     const authHeader = req.headers.get("authorization");
+    const body = await req.json();
+    const { firstName, lastName, email, speciality, phoneNumber, address } = body;
 
-//     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-//       return NextResponse.json({ message: "Non autorisé" }, { status: 401 });
-//     }
+    const updatedDoctor = await prisma.user.update({
+      where: { id: userId, role: "Medecin" },
+      data: {
+        firstName,
+        lastName,
+        email,
+        speciality,
+        phoneNumber,
+        address,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        speciality: true,
+        phoneNumber: true,
+        address: true,
+      },
+    });
 
-//     const token = authHeader.split(" ")[1];
-//     const { payload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-//     const { id, role } = payload as { id: string; role: string };
-
-//     if (role !== "Medecin") {
-//       return NextResponse.json({ message: "Accès réservé aux médecins" }, { status: 403 });
-//     }
-
-//     const user = await prisma.user.findUnique({
-//       where: { id },
-//       include: {
-//         medicalRecords: { take: 10 },
-//         authoredRecords: { take: 10 },
-//       },
-//     });
-
-//     if (!user) {
-//       return NextResponse.json({ message: "Utilisateur introuvable" }, { status: 404 });
-//     }
-
-//     const patients = await Promise.all(
-//       user.medicalRecords.map(async (record: MedicalRecord) => {
-//         const patient = await prisma.user.findUnique({
-//           where: { id: record.patientId },
-//           select: { firstName: true, lastName: true, dateOfBirth: true },
-//         });
-//         return {
-//           id: record.patientId,
-//           firstName: patient?.firstName || "",
-//           lastName: patient?.lastName || "",
-//           birthDate: patient?.dateOfBirth ? patient.dateOfBirth.toISOString().split("T")[0] : "",
-//           dossier: record.content || "",
-//         };
-//       })
-//     );
-
-//     const accessRequests = await prisma.accessRequest.findMany({
-//       where: { grantedToId: id, status: "PENDING" },
-//       select: { id: true, createdAt: true, status: true, requestedById: true },
-//     });
-
-//     const notifications = accessRequests.map((request: AccessRequest) => ({
-//       id: request.id,
-//       message: `Nouvelle demande d'accès de ${request.requestedById}`,
-//       date: request.createdAt.toISOString(),
-//       read: false,
-//     }));
-
-//     return NextResponse.json({ ...user, patients, notifications });
-//   } catch (error) {
-//     console.error("Erreur interne:", error);
-//     return NextResponse.json({ message: "Erreur interne serveur" }, { status: 500 });
-//   }
-// }
+    return NextResponse.json(updatedDoctor, { status: 200 });
+  } catch (error) {
+    console.error("Erreur dans /api/medecin/me PUT :", error);
+    return NextResponse.json(
+      { error: "Erreur lors de la mise à jour du profil." },
+      { status: 500 }
+    );
+  }
+}
