@@ -1,4 +1,5 @@
 
+// app/api/medecin/notifications/route.ts
 import { NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 import prisma from "@/lib/prisma";
@@ -7,16 +8,26 @@ const JWT_SECRET = process.env.JWT_SECRET
   ? new TextEncoder().encode(process.env.JWT_SECRET)
   : null;
 
-interface Notification {
+type AllowedType =
+  | "appointment"
+  | "consultation"
+  | "result"
+  | "accessRequest"
+  | "accessResponse"
+  | "appointmentRequest"
+  | "appointmentResponse"
+  | "alert";
+
+interface NotificationDTO {
   id: string;
   message: string;
   date: string;
   read: boolean;
   createdAt: string;
   updatedAt: string;
-  type?: string; // facultatif si tu veux l'utiliser
+  type?: AllowedType;
+  relatedId?: string | null;
 }
-
 
 interface NotificationFromPrisma {
   id: string;
@@ -25,147 +36,136 @@ interface NotificationFromPrisma {
   read: boolean;
   createdAt: Date;
   updatedAt: Date;
-  medecinId: string | null; 
   type: string;
-  patient: {
-    firstName: string | null;
-    lastName: string | null;
-  } | null; 
-}
-
-
-
-interface NotificationListResponse {
-  notifications: Notification[];
-  unreadCount: number;
-  pagination: {
-    currentPage: number;
-    totalPages: number;
-    totalItems: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-  };
-}
-
-interface PatchRequestBody {
-  notificationId: string;
-}
-
-interface BulkUpdateResponse {
-  message: string;
-  count: number;
-}
-
-interface PostRequestBody {
-  medecinId: string;
-  message: string;
+  relatedId: string | null;  
+  patient: { firstName: string | null; lastName: string | null } | null;
 }
 
 export async function GET(req: Request) {
   try {
     if (!JWT_SECRET) {
-      console.error("JWT_SECRET non défini.");
       return NextResponse.json({ error: "Configuration serveur incorrecte." }, { status: 500 });
     }
 
     const authHeader = req.headers.get("authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) {
-      console.log("Aucun token fourni pour /api/medecin/notifications.");
       return NextResponse.json({ error: "Token manquant." }, { status: 401 });
     }
 
-    let payload;
+    let payload: any;
     try {
       const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
       payload = verifiedPayload;
-    } catch (err) {
-      console.error("Erreur de vérification du token pour /api/medecin/notifications :", err);
+    } catch {
       return NextResponse.json({ error: "Token invalide ou expiré." }, { status: 401 });
     }
 
     const userId = typeof payload.id === "string" ? payload.id : undefined;
     const role = typeof payload.role === "string" ? payload.role : undefined;
-    if (!userId || !role || role !== "Medecin") {
-      console.log("Rôle non autorisé pour /api/medecin/notifications :", { userId, role });
+    if (!userId || role !== "Medecin") {
       return NextResponse.json({ error: "Accès non autorisé." }, { status: 403 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId, role: "Medecin" },
-    });
-    if (!user) {
-      console.log("Médecin non trouvé pour userId :", userId);
-      return NextResponse.json({ error: "Médecin non trouvé." }, { status: 404 });
-    }
-
     const url = new URL(req.url);
-    const page = parseInt(url.searchParams.get("page") || "1");
-    const limit = parseInt(url.searchParams.get("limit") || "10");
+    const page = parseInt(url.searchParams.get("page") || "1", 10);
+    const limit = parseInt(url.searchParams.get("limit") || "10", 10);
     const unreadOnly = url.searchParams.get("unreadOnly") === "true";
     const skip = (page - 1) * limit;
-    const allowedTypes = ["appointment", "consultation", "result", "accessRequest", "accessResponse", "appointmentRequest", "appointmentResponse"];
-    const where = { 
-        medecinId: userId,
-      type: {
-              in: allowedTypes,
-    },
+
+    const allowedTypes: AllowedType[] = [
+      "result",
+      "accessRequest",
+      "accessResponse",
+      "appointmentRequest",
+      "appointmentResponse",
+      "alert",
+    ];
+
+    const where = {
+      medecinId: userId,
+      target: "Medecin",
+      type: { in: allowedTypes as string[] },
       ...(unreadOnly && { read: false }),
     };
 
     const notifications = await prisma.notification.findMany({
-  where,
-  orderBy: { date: "desc" },
-  skip,
-  take: limit,
-  include: {
-    patient: {
-      select: { firstName: true, lastName: true },
-    },
-  },
-});
-
+      where,
+      orderBy: { date: "desc" },
+      skip,
+      take: limit,
+      include: {
+        patient: { select: { firstName: true, lastName: true } },
+      },
+    });
 
     const [totalNotifications, unreadCount] = await Promise.all([
       prisma.notification.count({ where }),
-      prisma.notification.count({ where: { medecinId: userId, read: false } }),
+      prisma.notification.count({ where: { medecinId: userId, target: "Medecin", read: false } }),
     ]);
 
-    const formattedNotifications: Notification[] = notifications.map((n: NotificationFromPrisma) => {
-  let customMessage = n.message;
+    const formatted: NotificationDTO[] = (notifications as NotificationFromPrisma[]).map(
+      (n: NotificationFromPrisma): NotificationDTO => {
+        const name =
+          [n.patient?.firstName, n.patient?.lastName].filter(Boolean).join(" ").trim() || "le patient";
 
-  if (n.type === "accessResponse") {
-    customMessage = n.message.toLowerCase().includes("accepté")
-      ? "Votre demande d'accès a été approuvée."
-      : "Votre demande d'accès a été refusée.";
-  }
+        const lower = (n.message || "").toLowerCase();
+        let msg = n.message || "Notification";
 
-  if (n.type === "appointmentResponse") {
-    customMessage = n.message.toLowerCase().includes("accepté")
-      ? "Votre demande de rendez-vous a été confirmée."
-      : "Votre demande de rendez-vous a été refusée.";
-  }
+        if (n.type === "accessResponse") {
+          const isShared = /(partag(e|é)|a partagé)/i.test(lower);
+          const isAccepted = /(approuv|accept)/i.test(lower);
+          const isDeclined = /(refus|déclin)/i.test(lower);
+        
+          if (isShared) {
+            // ✅ partage spontané du patient : on garde le message d'origine
+            msg = n.message || `Le patient a partagé son dossier.`;
+          } else if (isAccepted) {
+            msg = `Votre demande d'accès a été approuvée par ${name}.`;
+          } else if (isDeclined) {
+            msg = `Votre demande d'accès a été refusée par ${name}.`;
+          } else {
+            // Sinon, ne pas forcer un "refusé" par défaut : on laisse le texte source
+            msg = n.message || "Notification";
+          }
+        }
 
-  return {
-    id: n.id,
-    message: customMessage,
-    date: n.date.toISOString(),
-    read: n.read,
-    createdAt: n.createdAt.toISOString(),
-    updatedAt: n.updatedAt.toISOString(),
-  };
-});
+        // if (n.type === "appointmentResponse") {
+        //   msg = n.message.toLowerCase().includes("confirmée") || n.message.toLowerCase().includes("accepté")
+        //     ? `Votre demande de rendez-vous a été confirmée par ${name}.`
+        //     : `Votre demande de rendez-vous a été refusée par ${name}.`;
+        // }
 
+        if (n.type === "appointmentResponse") {
+          const isAccept = /(confirm|accept|approuv|valid)/i.test(lower);   // confirmé/accepté/approuvé/validé
+          const isDecline = /(refus|déclin|declin|annul)/i.test(lower);     // refus/déclin/annul
 
-    console.log("Notifications renvoyées pour medecinId :", userId, {
-      count: formattedNotifications.length,
-      unreadCount,
-      page,
-    });
+          if (isAccept) {
+            msg = `Le patient ${name} a confirmé la proposition de rendez-vous.`;
+          } else if (isDecline) {
+            msg = `Le patient ${name} a refusé la proposition de rendez-vous.`;
+          } else {
+            // ⚠️ Si on ne sait pas, on garde le texte source (surtout pas "refusé" par défaut)
+            msg = n.message || "Notification";
+          }
+        }
+
+        return {
+          id: n.id,
+          message: msg || "Notification",
+          date: n.date.toISOString(),
+          read: n.read,
+          createdAt: n.createdAt.toISOString(),
+          updatedAt: n.updatedAt.toISOString(),
+          type: n.type as AllowedType,
+          relatedId: n.relatedId ?? null, 
+        };
+      }
+    );
 
     return NextResponse.json(
       {
-        notifications: formattedNotifications,
+        notifications: formatted,
         unreadCount,
         pagination: {
           currentPage: page,
@@ -178,165 +178,9 @@ export async function GET(req: Request) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("Erreur dans /api/medecin/notifications GET :", {
-      message: error instanceof Error ? error.message : "Erreur inconnue",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
+    console.error("Erreur /api/medecin/notifications GET :", error);
     return NextResponse.json(
-      { error: "Erreur lors de la récupération des notifications.", details: error instanceof Error ? error.message : "Erreur inconnue" },
-      { status: 500 }
-    );
-  }
-}
-
-// export async function PATCH(req: Request) {
-//   try {
-//     if (!JWT_SECRET) {
-//       console.error("JWT_SECRET non défini.");
-//       return NextResponse.json({ error: "Configuration serveur incorrecte." }, { status: 500 });
-//     }
-
-//     const authHeader = req.headers.get("authorization");
-//     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-//     if (!token) {
-//       console.log("Aucun token fourni pour /api/medecin/notifications PATCH.");
-//       return NextResponse.json({ error: "Token manquant." }, { status: 401 });
-//     }
-
-//     let payload;
-//     try {
-//       const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-//       payload = verifiedPayload;
-//     } catch (err) {
-//       console.error("Erreur de vérification du token pour /api/medecin/notifications PATCH :", err);
-//       return NextResponse.json({ error: "Token invalide ou expiré." }, { status: 401 });
-//     }
-
-//     const userId = typeof payload.id === "string" ? payload.id : undefined;
-//     const role = typeof payload.role === "string" ? payload.role : undefined;
-//     if (!userId || !role || role !== "Medecin") {
-//       console.log("Rôle non autorisé pour /api/medecin/notifications PATCH :", { userId, role });
-//       return NextResponse.json({ error: "Accès non autorisé." }, { status: 403 });
-//     }
-
-//     const user = await prisma.user.findUnique({
-//       where: { id: userId, role: "Medecin" },
-//     });
-//     if (!user) {
-//       console.log("Médecin non trouvé pour userId :", userId);
-//       return NextResponse.json({ error: "Médecin non trouvé." }, { status: 404 });
-//     }
-
-//     const { notificationId }: PatchRequestBody = await req.json();
-//     if (!notificationId) {
-//       return NextResponse.json({ error: "notificationId manquant." }, { status: 400 });
-//     }
-
-//     const updatedNotification = await prisma.notification.update({
-//       where: {
-//         id: notificationId,
-//         medecinId: userId,
-//       },
-//       data: { read: true },
-//     });
-
-//     console.log("Notification marquée comme lue pour medecinId :", userId, { notificationId });
-
-//     return NextResponse.json(updatedNotification, { status: 200 });
-//   } catch (error) {
-//     console.error("Erreur dans /api/medecin/notifications PATCH :", {
-//       message: error instanceof Error ? error.message : "Erreur inconnue",
-//       stack: error instanceof Error ? error.stack : undefined,
-//     });
-//     return NextResponse.json(
-//       { error: "Erreur lors de la mise à jour de la notification.", details: error instanceof Error ? error.message : "Erreur inconnue" },
-//       { status: 500 }
-//     );
-//   }
-// }
-export async function PATCH(req: Request) {
-  try {
-    if (!JWT_SECRET) {
-      console.error("JWT_SECRET non défini.");
-      return NextResponse.json({ error: "Configuration serveur incorrecte." }, { status: 500 });
-    }
-
-    const authHeader = req.headers.get("authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) {
-      console.log("Aucun token fourni pour /api/medecin/notifications PATCH.");
-      return NextResponse.json({ error: "Token manquant." }, { status: 401 });
-    }
-
-    let payload;
-    try {
-      const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-      payload = verifiedPayload;
-    } catch (err) {
-      console.error("Erreur de vérification du token:", err);
-      return NextResponse.json({ error: "Token invalide ou expiré." }, { status: 401 });
-    }
-
-    const userId = typeof payload.id === "string" ? payload.id : undefined;
-    const role = typeof payload.role === "string" ? payload.role : undefined;
-    if (!userId || !role || role !== "Medecin") {
-      console.log("Rôle non autorisé:", { userId, role });
-      return NextResponse.json({ error: "Accès non autorisé." }, { status: 403 });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId, role: "Medecin" },
-    });
-    if (!user) {
-      console.log("Médecin non trouvé pour userId:", userId);
-      return NextResponse.json({ error: "Médecin non trouvé." }, { status: 404 });
-    }
-
-    const { notificationId, action }: { notificationId: string; action: "accept" | "decline" } = await req.json();
-    console.log("Requête reçue:", { notificationId, action });
-
-    if (!notificationId || !action) {
-      console.log("Paramètres manquants:", { notificationId, action });
-      return NextResponse.json({ error: "notificationId et action sont requis." }, { status: 400 });
-    }
-
-    const updatedNotification = await prisma.notification.update({
-      where: {
-        id: notificationId,
-        medecinId: userId,
-      },
-      data: { read: true },
-      include: { patient: { select: { firstName: true, lastName: true } } },
-    });
-
-    console.log("Notification avant mise à jour:", updatedNotification);
-
-    let customMessage = updatedNotification.message;
-    if (updatedNotification.type === "accessResponse" || updatedNotification.type === "accessRequest") {
-      customMessage = action === "accept"
-        ? `Le patient ${updatedNotification.patient?.firstName || "Inconnu"} ${updatedNotification.patient?.lastName || ""} a accepté votre demande d'accès.`
-        : `Le patient ${updatedNotification.patient?.firstName || "Inconnu"} ${updatedNotification.patient?.lastName || ""} a refusé votre demande d'accès.`;
-    } else if (updatedNotification.type === "appointmentResponse" || updatedNotification.type === "appointmentRequest") {
-      customMessage = action === "accept"
-        ? `Le patient ${updatedNotification.patient?.firstName || "Inconnu"} ${updatedNotification.patient?.lastName || ""} a confirmé votre demande de rendez-vous.`
-        : `Le patient ${updatedNotification.patient?.firstName || "Inconnu"} ${updatedNotification.patient?.lastName || ""} a refusé le rendez-vous programmé le ${new Date(updatedNotification.date).toLocaleDateString("fr-FR")}.`;
-    }
-
-    const finalNotification = {
-      ...updatedNotification,
-      message: customMessage,
-    };
-
-    console.log("Notification après mise à jour:", finalNotification);
-
-    return NextResponse.json(finalNotification, { status: 200 });
-  } catch (error) {
-    console.error("Erreur dans PATCH:", {
-      message: error instanceof Error ? error.message : "Erreur inconnue",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    return NextResponse.json(
-      { error: "Erreur lors de la mise à jour de la notification.", details: error instanceof Error ? error.message : "Erreur inconnue" },
+      { error: "Erreur lors de la récupération des notifications." },
       { status: 500 }
     );
   }
@@ -345,102 +189,69 @@ export async function PATCH(req: Request) {
 export async function PUT(req: Request) {
   try {
     if (!JWT_SECRET) {
-      console.error("JWT_SECRET non défini.");
       return NextResponse.json({ error: "Configuration serveur incorrecte." }, { status: 500 });
     }
 
     const authHeader = req.headers.get("authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) {
-      console.log("Aucun token fourni pour /api/medecin/notifications PUT.");
-      return NextResponse.json({ error: "Token manquant." }, { status: 401 });
-    }
+    if (!token) return NextResponse.json({ error: "Token manquant." }, { status: 401 });
 
-    let payload;
-    try {
-      const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-      payload = verifiedPayload;
-    } catch (err) {
-      console.error("Erreur de vérification du token pour /api/medecin/notifications PUT :", err);
-      return NextResponse.json({ error: "Token invalide ou expiré." }, { status: 401 });
-    }
-
+    const { payload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
     const userId = typeof payload.id === "string" ? payload.id : undefined;
     const role = typeof payload.role === "string" ? payload.role : undefined;
-    if (!userId || !role || role !== "Medecin") {
-      console.log("Rôle non autorisé pour /api/medecin/notifications PUT :", { userId, role });
+    if (!userId || role !== "Medecin") {
       return NextResponse.json({ error: "Accès non autorisé." }, { status: 403 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId, role: "Medecin" },
-    });
-    if (!user) {
-      console.log("Médecin non trouvé pour userId :", userId);
-      return NextResponse.json({ error: "Médecin non trouvé." }, { status: 404 });
-    }
-
-    const updatedNotifications = await prisma.notification.updateMany({
-      where: {
-        medecinId: userId,
-        read: false,
-      },
+    const updated = await prisma.notification.updateMany({
+      where: { medecinId: userId, target: "Medecin", read: false },
       data: { read: true },
     });
 
-    console.log("Notifications marquées comme lues pour medecinId :", userId, { count: updatedNotifications.count });
-
-    return NextResponse.json(
-      {
-        message: "Toutes les notifications ont été marquées comme lues.",
-        count: updatedNotifications.count,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({ message: "Notifications lues.", count: updated.count }, { status: 200 });
   } catch (error) {
-    console.error("Erreur dans /api/medecin/notifications PUT :", {
-      message: error instanceof Error ? error.message : "Erreur inconnue",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
+    console.error("Erreur /api/medecin/notifications PUT :", error);
     return NextResponse.json(
-      { error: "Erreur lors de la mise à jour des notifications.", details: error instanceof Error ? error.message : "Erreur inconnue" },
+      { error: "Erreur lors de la mise à jour des notifications." },
       { status: 500 }
     );
   }
 }
 
+// (optionnel) POST si un autre service veut pousser une notif médecin via HTTP.
+// Le flux patient → médecin écrit déjà directement en DB, donc ce POST n'est pas requis.
 export async function POST(req: Request) {
   try {
-    const { medecinId, message, type } = await req.json();
+    const { medecinId, message, type, patientId, relatedId } = (await req.json()) as {
+      medecinId: string;
+      message: string;
+      type?: AllowedType;
+      patientId?: string;
+      relatedId?: string | null;
+    };
+
     if (!medecinId || !message) {
       return NextResponse.json({ error: "medecinId et message sont requis." }, { status: 400 });
     }
 
-    const medecin = await prisma.user.findUnique({
-      where: { id: medecinId, role: "Medecin" },
-    });
-    if (!medecin) {
-      return NextResponse.json({ error: "Médecin non trouvé." }, { status: 404 });
-    }
-
-    const notification = await prisma.notification.create({
+    const notif = await prisma.notification.create({
       data: {
         medecinId,
+        patientId: patientId || null,
         message,
+        type: (type || "alert") as string,
         date: new Date(),
         read: false,
-       type: type || "appointment", // Automatiquement défini pour une demande de rendez-vous
+        relatedId: relatedId || null,
+        target: "Medecin",
       },
     });
 
-    return NextResponse.json({ success: true, notification }, { status: 201 });
+    return NextResponse.json({ success: true, notification: notif }, { status: 201 });
   } catch (error) {
-    console.error("Erreur dans /api/medecin/notifications POST :", {
-      message: error instanceof Error ? error.message : "Erreur inconnue",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
+    console.error("Erreur /api/medecin/notifications POST :", error);
     return NextResponse.json(
-      { error: "Erreur lors de la création de la notification.", details: error instanceof Error ? error.message : "Erreur inconnue" },
+      { error: "Erreur lors de la création de la notification." },
       { status: 500 }
     );
   }

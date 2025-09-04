@@ -79,20 +79,31 @@ model Consultation {
 }
 
 model Notification {
-  id        String       @id @default(uuid())
-  message   String
-  date      DateTime     @default(now())
-  read      Boolean      @default(false)
-  type      String       // Changé pour "general" comme valeur par défaut
-  relatedId String?      @unique// Supprimez @unique si plusieurs notifications par AccessRequest sont possibles
-  patientId String?
-  patient   User?        @relation("NotificationPatient", fields: [patientId], references: [id])
-  medecinId String?
-  medecin   User?        @relation("NotificationMedecin", fields: [medecinId], references: [id])
-  accessRequest AccessRequest? @relation("NotificationAccessRequest", fields: [relatedId], references: [id])
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id            String       @id @default(uuid())
+  message       String
+  date          DateTime     @default(now())
+  read          Boolean      @default(false)
+  type          String       // "accessRequest" | "accessResponse" | "appointment" | ...
+  target        String       // "Patient" | "Medecin"
+  relatedId     String?      // FK -> AccessRequest.id (plus d'@unique ici)
+  patientId     String?
+  patient       User?        @relation("NotificationPatient", fields: [patientId], references: [id])
+  medecinId     String?
+  medecin       User?        @relation("NotificationMedecin", fields: [medecinId], references: [id])
+
+  // ⚠️ on autorise plusieurs notifs par accessRequest
+  accessRequest AccessRequest? @relation("NotificationAccessRequest", fields: [relatedId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // --- Index & contrainte composite recommandés ---
+  @@index([relatedId])
+  @@index([patientId, target, read])
+  @@index([medecinId, target, read])
+  @@unique([relatedId, type, target]) // idempotence par (accessRequest, type, cible)
 }
+
 
 
 model Result {
@@ -117,6 +128,9 @@ model Result {
 
   // ✅ Relation ajoutée pour BlockchainTransaction
   blockchainTransactions BlockchainTransaction[]
+  blockchainVerified Boolean? // ✅ Nouveau champ ajouté
+  blockchainVerifiedAt DateTime?
+  
 }
 
 model AccessRequest {
@@ -126,8 +140,9 @@ model AccessRequest {
   medecinId  String
   patient    User         @relation("PatientAccessRequests", fields: [patientId], references: [id])
   medecin    User         @relation("MedecinAccessRequests", fields: [medecinId], references: [id])
+  motif     String?  // <-- motif libre
+  notifications Notification[] @relation("NotificationAccessRequest")
 
-  notification Notification? @relation("NotificationAccessRequest")
 
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
@@ -138,6 +153,33 @@ model BlockchainTransaction {
   id              String   @id @default(uuid())
   relatedResultId String   @unique
   transactionHash String
+  transactionId   String?
+  status           String?       
+  error            String?      
   result          Result   @relation(fields: [relatedResultId], references: [id])
   createdAt       DateTime @default(now())
+
+}
+
+
+enum Scope {
+  RESULTS
+  ORDONNANCES
+  TESTS
+  ALL
+}
+
+model AccessGrant {
+  id          String   @id @default(uuid())
+  patientId   String
+  medecinId   String
+  scope       Scope
+  resourceIds String[] @default([]) // liste précise optionnelle (sinon scope global)
+  expiresAt   DateTime
+  revoked     Boolean  @default(false)
+  reasonHash  String?  // hash (SHA-256) du motif
+  accessRequestId String?  @unique
+  onChainKey  String?  // clé composite renvoyée/utilisée côté Fabric ("grant:patientId:medecinId:grantId")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

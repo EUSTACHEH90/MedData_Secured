@@ -176,29 +176,8 @@ async function main() {
     },
   });
 
-  // Notifications
-  await prisma.notification.createMany({
-    data: [
-      {
-        id: "923e4567-e89b-12d3-a456-426614174008",
-        message: "Rappel : Rendez-vous le 20 juin à 10h.",
-        date: new Date("2025-06-18T12:00:00Z"),
-        read: false,
-        patientId: "123e4567-e89b-12d3-a456-426614174000",
-        medecinId: "9848c962-f6e4-416c-aa32-158e7427e429",
-      },
-      {
-        id: "a23e4567-e89b-12d3-a456-426614174009",
-        message: "Résultats d'échographie disponibles.",
-        date: new Date("2025-06-18T15:00:00Z"),
-        read: false,
-        patientId: "223e4567-e89b-12d3-a456-426614174001",
-        medecinId: "9848c962-f6e4-416c-aa32-158e7427e429",
-      },
-    ],
-  });
+   // Demandes d’accès (AccessRequest)
 
-  // Demandes d’accès (AccessRequest)
   await prisma.accessRequest.createMany({
     data: [
       {
@@ -215,6 +194,57 @@ async function main() {
       },
     ],
   });
+
+  // Notifications
+await prisma.notification.createMany({
+  data: [
+    {
+      id: "923e4567-e89b-12d3-a456-426614174008",
+      message: "Rappel : Rendez-vous le 20 juin à 10h.",
+      date: new Date("2025-06-18T12:00:00Z"),
+      read: false,
+      patientId: "123e4567-e89b-12d3-a456-426614174000",
+      medecinId: "9848c962-f6e4-416c-aa32-158e7427e429",
+      type: "appointment",
+      target: "Patient", // Le patient reçoit un rappel
+    },
+    {
+      id: "a23e4567-e89b-12d3-a456-426614174009",
+      message: "Résultats d'échographie disponibles.",
+      date: new Date("2025-06-18T15:00:00Z"),
+      read: false,
+      patientId: "223e4567-e89b-12d3-a456-426614174001",
+      medecinId: "9848c962-f6e4-416c-aa32-158e7427e429",
+      type: "resultAvailable",
+      target: "Patient", // La patiente est notifiée que ses résultats sont disponibles
+    },
+    {
+      id: "b23e4567-e89b-12d3-a456-426614174012",
+      message: "Nouvelle demande d'accès au dossier médical.",
+      date: new Date("2025-06-18T16:00:00Z"),
+      read: false,
+      patientId: "123e4567-e89b-12d3-a456-426614174000",
+      medecinId: "9848c962-f6e4-416c-aa32-158e7427e429",
+      relatedId: "b23e4567-e89b-12d3-a456-426614174010",
+      type: "accessRequest",
+      target: "Patient", // Le patient reçoit une demande d’accès
+    },
+    {
+      id: "c23e4567-e89b-12d3-a456-426614174013",
+      message: "Le patient Marie Leclerc a accepté votre demande d'accès.",
+      date: new Date("2025-06-18T17:00:00Z"),
+      read: false,
+      patientId: "223e4567-e89b-12d3-a456-426614174001",
+      medecinId: "9848c962-f6e4-416c-aa32-158e7427e429",
+      relatedId: "c23e4567-e89b-12d3-a456-426614174011",
+      type: "accessResponse",
+      target: "Medecin", // Le médecin est notifié que sa demande a été acceptée
+    }
+  ],
+});
+
+
+
 }
 
 main()

@@ -162,6 +162,7 @@ export async function POST(request: Request) {
         patientId,
         medecinId,
         date: new Date(date),
+        // target: "Patient",
         summary,
       },
     });
@@ -175,6 +176,7 @@ export async function POST(request: Request) {
         date: new Date(),
         read: false,
         type: "consultation", // Automatiquement défini
+        target: "Patient",
       },
     });
 

@@ -16,6 +16,7 @@ interface Doctor extends User {
   speciality: string | null;
   phoneNumber: string | null;
   address: string | null;
+  numeroOrdre: string | null;
 }
 
 interface Notification {
@@ -79,6 +80,7 @@ export async function GET(req: Request) {
         speciality: true,
         phoneNumber: true,
         address: true,
+        numeroOrdre: true,
       },
     });
 
@@ -179,7 +181,7 @@ export async function PUT(req: Request) {
     }
 
     const body = await req.json();
-    const { firstName, lastName, email, speciality, phoneNumber, address } = body;
+    const { firstName, lastName, email, speciality, phoneNumber, address, numeroOrdre } = body;
 
     const updatedDoctor = await prisma.user.update({
       where: { id: userId, role: "Medecin" },
@@ -190,6 +192,7 @@ export async function PUT(req: Request) {
         speciality,
         phoneNumber,
         address,
+        numeroOrdre: body.numeroOrdre,
       },
       select: {
         id: true,
@@ -199,6 +202,7 @@ export async function PUT(req: Request) {
         speciality: true,
         phoneNumber: true,
         address: true,
+        numeroOrdre: true,
       },
     });
 
